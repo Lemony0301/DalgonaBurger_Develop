@@ -28,4 +28,4 @@ if __name__ == "__main__":
         reload=True,
     )
     
-#uvicorn AI_app.main:app --host 0.0.0.0 --port 8002 실행용
+#uvicorn AI_app.main:app --host 0.0.0.0 --port 8002
