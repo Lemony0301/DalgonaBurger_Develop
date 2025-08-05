@@ -21,5 +21,4 @@ async def ai_ws(ws: WebSocket):
         res = await generate_action(req)
         await ws.send_text(res.model_dump_json())
 
-        print(f"[AI] ⇒ data={res.param}, {res.promptLen}")
-        print(f"[AI] ⇒ action={res.actionType} err={res.error}")
+        print(f"[AI] ⇒ data={res.code}, len={res.promptLen}, err={res.error}")
