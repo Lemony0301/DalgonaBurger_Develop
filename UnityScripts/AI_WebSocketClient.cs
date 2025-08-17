@@ -26,6 +26,9 @@ public class ActionResponse
 
 public class AI_WebSocketClient : MonoBehaviour
 {
+    [Header("API Base")]
+    public string wsUrl = "ws://192.168.55.82:8002/ws";
+
     [Header("UI References")]
     // ── UI 컴포넌트 참조 ──
     public InputField userIdField;                  // 유저 ID 입력란
@@ -46,7 +49,7 @@ public class AI_WebSocketClient : MonoBehaviour
     // ──────────────────
     void Start()
     {
-        ws = new WebSocket("ws://192.168.55.82:8002/ws");     // AI 서버 주소
+        ws = new WebSocket(wsUrl);     // AI 서버 주소
 
         ws.OnOpen    += (_, __) => Debug.Log("✅ Connected to AI WebSocket Server");
         ws.OnMessage += (_,  e) => HandleServerMessage(e.Data);

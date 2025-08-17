@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # ▶ 데이터베이스
     # ───────────────────────────
     database_url: str = (
-        "postgresql+asyncpg://user:1234@localhost:5432/mydb"
+        "postgresql+asyncpg://gameapp_user:1234@192.168.55.82:5432/dalgona_game"
     )
 
     # ───────────────────────────
