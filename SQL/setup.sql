@@ -1,10 +1,10 @@
 -- ===========================================
--- Clean setup for "gameapp" on database dalgona_game
+-- Clean setup for "gameapp" on database dalgona_db
 -- Creates role, schema, tables, seed, triggers
 -- All ASCII, UTF-8 safe
 -- ===========================================
 
--- Optional: CREATE DATABASE dalgona_game;
+-- Optional: CREATE DATABASE dalgona_db;
 
 SET client_encoding = 'UTF8';
 
@@ -17,13 +17,13 @@ BEGIN
 END$$;
 
 -- 2) DB connect privilege
-GRANT CONNECT ON DATABASE dalgona_game TO gameapp_user;
+GRANT CONNECT ON DATABASE dalgona_db TO gameapp_user;
 
 -- 3) Schema
 CREATE SCHEMA IF NOT EXISTS gameapp AUTHORIZATION gameapp_user;
 
 -- 4) Fix search_path for the role on this DB
-ALTER ROLE gameapp_user IN DATABASE dalgona_game SET search_path = gameapp, public;
+ALTER ROLE gameapp_user IN DATABASE dalgona_db SET search_path = gameapp, public;
 
 -- 5) Build objects under gameapp and owned by gameapp_user
 SET search_path TO gameapp, public;

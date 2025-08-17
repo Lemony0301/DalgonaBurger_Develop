@@ -1,4 +1,5 @@
-TRUNCATE TABLE run_logs RESTART IDENTITY;
-TRUNCATE TABLE users RESTART IDENTITY;
-TRUNCATE TABLE stages RESTART IDENTITY;
-TRUNCATE TABLE user_stage_progress RESTART IDENTITY;
+TRUNCATE TABLE
+  dalgona_game.run_logs,
+  dalgona_game.user_stage_progress,
+  dalgona_game.users
+RESTART IDENTITY CASCADE;
