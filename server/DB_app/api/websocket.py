@@ -62,11 +62,12 @@ async def ws_handler(ws: WebSocket):
             # 2) DB 처리: 진행 업데이트 + 로그 적재 + 퍼센트/랭크 계산
             try:
                 rank_clear_pct = 100.0
-                rank_tokens_pct = 100.0
+                rank_length_pct = 100.0
                 rank_clear = 1
-                rank_tokens = 1
-                total = 1
-
+                rank_length = 1
+                total_time = 1
+                total_length = 1
+                
                 async with async_session() as session, session.begin():
                     # 유저 보장(REST로 이미 만들었다면 get만 통과)
                     user = await session.get(UserORM, data.user_id)
@@ -95,9 +96,17 @@ async def ws_handler(ws: WebSocket):
                     # 클리어 기록(트리거가 다음 스테이지 해금)
                     prog.unlocked = True
                     prog.cleared = True
-                    prog.prompt_length = int(data.prompt_length)
-                    prog.clear_time_ms = int(data.clear_time_ms)
-                    prog.cleared_at = func.now()
+
+                    new_time = int(data.clear_time_ms)
+                    new_length = int(data.prompt_length)
+
+                    improved_time = (prog.clear_time_ms is None) or (new_time < prog.clear_time_ms)
+                    improved_length = (prog.prompt_length is None) or (new_length < prog.prompt_length)
+
+                    if improved_time:
+                        prog.clear_time_ms = new_time
+                    if improved_length:
+                        prog.prompt_length = new_length
 
                     # 러닝 로그 적재
                     new_log = RunLogORM(
@@ -112,39 +121,68 @@ async def ws_handler(ws: WebSocket):
                     await session.flush()
 
                     # === 집계 ===
-                    total = await session.scalar(
-                        select(func.count()).select_from(RunLogORM).where(
-                            RunLogORM.stage_code == data.stage_code
+
+                    my_best_time = prog.clear_time_ms
+                    my_best_length = prog.prompt_length
+
+                    # 1) clear_time 기준
+                    others_total_time = await session.scalar(
+                        select(func.count()).select_from(UserStageProgressORM).where(
+                            UserStageProgressORM.stage_id == stage.stage_id,
+                            UserStageProgressORM.cleared.is_(True),
+                            UserStageProgressORM.clear_time_ms.isnot(None),
+                            UserStageProgressORM.user_id != data.user_id
                         )
                     ) or 0
 
-                    faster = await session.scalar(
-                        select(func.count()).select_from(RunLogORM).where(
-                            RunLogORM.stage_code == data.stage_code,
-                            RunLogORM.clear_time_ms < int(data.clear_time_ms)
+                    total_time = others_total_time + (1 if my_best_time is not None else 0)
+
+                    faster_time = 0
+                    if my_best_time is not None and total_time > 0:
+                        faster_time = await session.scalar(
+                            select(func.count()).select_from(UserStageProgressORM).where(
+                                UserStageProgressORM.stage_id == stage.stage_id,
+                                UserStageProgressORM.cleared.is_(True),
+                                UserStageProgressORM.clear_time_ms.isnot(None),
+                                UserStageProgressORM.user_id != data.user_id,
+                                UserStageProgressORM.clear_time_ms < my_best_time
+                            )
+                        ) or 0
+                        rank_clear = int(faster_time) + 1
+                        if total_time > 0:
+                            rank_clear_pct = round((rank_clear / total_time) * 100.0, 2)
+                        else:
+                            rank_clear_pct = 0.0
+
+                    # 2) prompt_length 기준
+                    others_length_length = await session.scalar(
+                        select(func.count()).select_from(UserStageProgressORM).where(
+                            UserStageProgressORM.stage_id == stage.stage_id,
+                            UserStageProgressORM.cleared.is_(True),
+                            UserStageProgressORM.prompt_length.isnot(None),
+                            UserStageProgressORM.user_id != data.user_id
                         )
                     ) or 0
 
-                    shorter = await session.scalar(
-                        select(func.count()).select_from(RunLogORM).where(
-                            RunLogORM.stage_code == data.stage_code,
-                            RunLogORM.prompt_length < int(data.prompt_length)
-                        )
-                    ) or 0
+                    total_length = others_length_length + (1 if my_best_length is not None else 0)
 
-                    # 랭크(competition rank: 동률은 같은 순위)
-                    rank_clear = int(faster) + 1
-                    rank_tokens = int(shorter) + 1
+                    shorter_length = 0
+                    if my_best_length is not None and total_length > 0:
+                        shorter_length = await session.scalar(
+                            select(func.count()).select_from(UserStageProgressORM).where(
+                                UserStageProgressORM.stage_id == stage.stage_id,
+                                UserStageProgressORM.cleared.is_(True),
+                                UserStageProgressORM.prompt_length.isnot(None),
+                                UserStageProgressORM.user_id != data.user_id,
+                                UserStageProgressORM.prompt_length < my_best_length
+                            )
+                        ) or 0
+                        rank_length = int(shorter_length) + 1
+                        if total_length > 0:
+                            rank_length_pct = round((rank_length / total_length) * 100.0, 2)
+                        else:
+                            rank_length_pct = 0.0
 
-                    # 퍼센트(자신보다 더 좋은 기록 비율)
-                    if total > 0:
-                        rank_clear_pct = round((int(faster) / total) * 100.0, 2)
-                        rank_tokens_pct = round((int(shorter) / total) * 100.0, 2)
-                    else:
-                        rank_clear_pct = 0.0
-                        rank_tokens_pct = 0.0
-
-                # (선택) 브로드캐스트
                 if broadcaster:
                     try:
                         await broadcaster.publish(data.model_dump())
@@ -154,18 +192,19 @@ async def ws_handler(ws: WebSocket):
                 # 게임 결과창에서 바로 사용할 응답
                 await ws.send_json({
                     "ack": True,
-                    "used_id":data.user_id,
+                    "user_id":data.user_id,
                     "stage": data.stage_code,
                     "rank_clear_time_percent": rank_clear_pct,
-                    "rank_tokens_percent": rank_tokens_pct,
-                    "rank_clear_time": rank_clear,     # ⬅️ 추가: 등수
-                    "rank_tokens": rank_tokens,         # ⬅️ 추가: 등수
-                    "total_records": total,             # ⬅️ 추가: 총 기록 수
+                    "rank_tokens_percent": rank_length_pct,
+                    "rank_clear_time": rank_clear,
+                    "rank_tokens": rank_length,
+                    "total_records": total_time,
                     "received_text": "ok"
                 })
-                print("[WS] saved:", data.model_dump(),
-                      f" ranks -> time:{rank_clear}/{total} ({rank_clear_pct}%), "
-                      f"tokens:{rank_tokens}/{total} ({rank_tokens_pct}%)")
+                print("[WS] saved (progress-based ranks):", data.model_dump(),
+                      f"time {rank_clear}/{total_time} ({rank_clear_pct}%), "
+                      f"length {rank_length}/{total_length} ({rank_length_pct}%)",
+                      f"improved_time={improved_time} improved_length={improved_length}")
 
             except SQLAlchemyError as e:
                 print("[WS][DB] error:", e)
